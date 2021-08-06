@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
@@ -98,91 +98,41 @@ namespace ParseTextXcom
                         currItem.localName = currItem.name;
                     }
 
+                    currItem.extraMats = new List<ExtraMat>();
+
                     testLine = manufacture.ReadLine().Trim();
                     while (!manufacture.EndOfStream && !Regex.IsMatch(testLine, "- name: .*"))
                     {
                         if (Regex.IsMatch(testLine, "space: .*"))
                         {
                             currItem.space = int.Parse(testLine.Split(' ').Last());
-                            currItem.totalSpace = currItem.space;
+                            currItem.TotalSpace = currItem.space;
                         }
                         else if (Regex.IsMatch(testLine, "time: .*"))
                         {
                             currItem.time = int.Parse(testLine.Split(' ').Last());
-                            currItem.totalTime = currItem.time;
+                            currItem.TotalTime = currItem.time;
                         }
                         else if (Regex.IsMatch(testLine, "cost: .*"))
                         {
                             currItem.cost = int.Parse(testLine.Split(' ').Last());
-                            currItem.totalCost = currItem.cost;
+                            currItem.TotalCost = currItem.cost;
                         }
                         else if (Regex.IsMatch(testLine, "requiredItems:"))
                         {
-                            // Add in costs for components...  I'll make this data-driven later
+                            // Add in manufacturing components
                             testLine = manufacture.ReadLine().Trim();
                             while (Regex.IsMatch(testLine, "STR_.*"))
                             {
                                 var tempSplit = testLine.Split(' ');
-                                ExtraMat extraMat = new ExtraMat()
-                                    { name = tempSplit.First(), qty = int.Parse(tempSplit.Last()) };
+                                // skip anything without a quantity
+                                if(Regex.IsMatch(tempSplit.Last(), "\\d+"))
+                                {
+                                    ExtraMat extraMat = new ExtraMat()
+                                        { name = tempSplit.First(), qty = int.Parse(tempSplit.Last()) };
 
-                                currItem.extraMats.Add(extraMat);
-
-                                //if (Regex.IsMatch(testLine, "STR_ALIEN_ALLOYS: .*"))
-                                //{
-                                //    currItem.alloys = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += currItem.alloys * 3000;
-                                //    currItem.totalSpace += 10;
-                                //    currItem.totalTime += currItem.alloys * 100;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_ELERIUM_115: .*"))
-                                //{
-                                //    currItem.elerium = int.Parse(testLine.Split(' ').Last());
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_TOXIGUN: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 57000;
-                                //    currItem.totalSpace += 15;
-                                //    currItem.totalTime += tempVal * 800;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_TOXIGUN_FLASK: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 4500;
-                                //    currItem.totalSpace += 7;
-                                //    currItem.totalTime += tempVal * 120;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_DURATHREAD: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 2000;
-                                //    currItem.totalSpace += 10;
-                                //    currItem.totalTime += tempVal * 60;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_PSICLONE: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 42000;
-                                //    currItem.totalSpace += 3;
-                                //    currItem.totalTime += tempVal * 1000;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_XCOM_PSICLONE: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 42100;
-                                //    currItem.totalSpace += 5;
-                                //    currItem.totalTime += tempVal * 1200;
-                                //}
-                                //else if (Regex.IsMatch(testLine, "STR_UFO_NAVIGATION: .*"))
-                                //{
-                                //    int tempVal = int.Parse(testLine.Split(' ').Last());
-                                //    currItem.totalCost += tempVal * 159000;
-                                //    currItem.totalSpace += (currItem.alloys > 0 ? 18 : 8);
-                                //    currItem.totalTime += tempVal * 1900;
-                                //}
-                                //else currItem.other = true;
-
+                                    currItem.extraMats.Add(extraMat);
+                                }
                                 testLine = manufacture.ReadLine().Trim();
                             }
                         }
@@ -206,21 +156,67 @@ namespace ParseTextXcom
             // At this point, we have a valid array of items, but without the
             // buildable materials costs factored in.  Let's fix that.
 
+            bool matsClearedFlag = false;
+            while(!matsClearedFlag)
+            { 
+                matsClearedFlag = true;
+
+                // Pick out the things that have extra mats so we can iterate through them
+                List<Item> subList = itemList.Where(x => x.extraMats.Count > 0).ToList();
+                for (int itemIdx = 0; itemIdx < subList.Count; itemIdx++)
+                {
+                    // Go through each mat and check if the item it points to is done being calculated; if so, add its totals.  Otherwise pass over it this loop. 
+                    Item currItem = subList[itemIdx];
+                    for(int matIdx = currItem.extraMats.Count - 1; matIdx >= 0; matIdx--)
+                    {
+                        ExtraMat currMat = currItem.extraMats[matIdx];
+                        Item matsItem = itemList.Find(x => x.name == currMat.name.Trim(':'));
+                        //Kick it out if we can't manufacture it
+                        if(matsItem == null)
+                        { 
+                            //TODO: Elerium
+                            currItem.other = true;
+                            currItem.extraMats.Remove(currMat);
+                            continue;
+                        }
+                        // Not everything in that mat is calculated, so we set the loop to go again and skip it
+                        if(matsItem.extraMats.Count > 0)
+                        { 
+                            matsClearedFlag = false;
+                            continue;
+                        }
+
+                        Console.WriteLine("Added mats to " + currItem.name);
+                        Console.WriteLine("Mat: " + matsItem.name);
+                        Console.WriteLine("Qty: " + currMat.qty);
+                        currItem.TotalCost += matsItem.TotalCost * currMat.qty;
+                        currItem.TotalTime += matsItem.TotalTime * currMat.qty;
+                        currItem.TotalSpace += matsItem.TotalSpace;
+                        currItem.alloys += matsItem.alloys * currMat.qty;
+                        currItem.elerium += matsItem.elerium * currMat.qty;
+                        currItem.extraMats.Remove(currMat);
+                        
+                    }
+                }
+            }
+
+            // Buildable materials are done.
+
             using (StreamWriter fs = new StreamWriter(File.Create(@"ProfChrt.csv")))
             {
                 fs.WriteLine(@"Name, Total Cost, Sell Price, Total Space, Total Time, Elerium, Non-Manufacturable Components");
                 foreach (var i in itemList.OrderBy(x => x.localName))
                 {
                     //if (i.elerium == 0)
-                    fs.WriteLine($"{i.localName}, {i.totalCost}, {i.sellPrice}, {i.totalSpace}, {i.totalTime}, {i.elerium}, {i.other}");
+                    fs.WriteLine($"{i.localName}, {i.TotalCost}, {i.sellPrice}, {i.TotalSpace}, {i.TotalTime}, {i.elerium}, {i.other}");
                 }
             }
 
-            //            Console.ReadKey();
+                       // Console.ReadKey();
         }
     }
 
-    public struct Item
+    public class Item
     {
         public string name;
         public string localName;
@@ -230,10 +226,12 @@ namespace ParseTextXcom
         public int alloys;
         public int elerium;
         public bool other;
-        public int totalCost;
-        public int totalTime;
-        public int totalSpace;
         public int sellPrice;
+
+        public int TotalCost { get; set; }
+        public int TotalTime { get; set; }
+        public int TotalSpace { get; set; }
+        
         public List<ExtraMat> extraMats;
     }
 
